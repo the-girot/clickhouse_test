@@ -1,0 +1,60 @@
+version: 2
+
+seeds:
+  - name: dim_city
+    config:
+      column_types:
+        city_id: UInt16
+        city_name: String
+
+  - name: dim_expense_category
+    config:
+      column_types:
+        cat_id: UInt32
+        group_name: String
+        group_stat: String
+        stat_name: String
+
+  - name: dim_counterparty
+    config:
+      column_types:
+        cp_id: UInt32
+        cp_name: String
+        cp_type: String
+
+  - name: dim_date
+    config:
+      column_types:
+        dt: Date
+        week: Date
+        month: Date
+        quarter: UInt8
+        year: UInt16
+        month_name: String
+
+  - name: fact_expenses
+    config:
+      column_types:
+        dt: Date
+        city_id: UInt16
+        cp_id: UInt32
+        cat_id: UInt32
+        doc_number: UInt32
+        mc_flag: UInt8
+        item_name: String
+        amount: Float64
+        has_category: UInt8
+
+  - name: fact_payments
+    config:
+      column_types:
+        dt: Date
+        city_id: UInt16
+        cp_id: UInt32
+        cat_id: UInt32
+        doc_number: UInt32
+        planned_sales: Float64
+        amount_to_pay: Float64
+        balance: Float64
+        is_paid: UInt8
+        due_date: Date

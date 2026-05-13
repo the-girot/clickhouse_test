@@ -1,0 +1,10 @@
+version: 2
+
+sources:
+  - name: raw
+    database: db1      
+    schema: db1
+    tables:
+      - name: fact_pnl
+      - name: fact_payments
+      - name: fact_expenses

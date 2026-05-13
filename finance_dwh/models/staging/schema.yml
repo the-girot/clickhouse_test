@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: stg_pnl
+    description: "Staging: ОПУ — фильтрация и каст типов"
+    columns:
+      - name: month
+        tests: [not_null]
+      - name: city_id
+        tests: [not_null]
+      - name: revenue
+        tests: [not_null]
+
+  - name: stg_payments
+    description: "Staging: платёжный календарь"
+    columns:
+      - name: dt
+        tests: [not_null]
+      - name: is_paid
+        tests:
+          - accepted_values:
+              values: [0, 1]
+
+  - name: stg_expenses
+    description: "Staging: детальные приёмки"
+    columns:
+      - name: dt
+        tests: [not_null]
+      - name: amount
+        tests: [not_null]
+
+  - name: mart_pnl_monthly
+    description: "Mart: рентабельность ОПУ по месяцам и городам"
+    columns:
+      - name: month
+        tests: [not_null]
+      - name: city_name
+        tests: [not_null]
+
+  - name: mart_payment_calendar
+    description: "Mart: баланс платёжного календаря по дням"
+
+  - name: mart_unpaid
+    description: "Mart: неоплаченные счета с контрагентами"
+
+  - name: mart_expenses_no_category
+    description: "Mart: приёмки без статьи расходов"
+
+  - name: mart_expenses_detail
+    description: "Mart: детальный реестр расходов (Большая сводная + Проверка расходов)"
