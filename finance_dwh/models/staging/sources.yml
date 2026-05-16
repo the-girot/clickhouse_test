@@ -2,9 +2,29 @@ version: 2
 
 sources:
   - name: raw
-    database: db1      
+    database: db1
     schema: db1
     tables:
       - name: fact_pnl
       - name: fact_payments
       - name: fact_expenses
+
+  - name: stg
+    database: db1
+    schema: stg
+    tables:
+      - name: stg_company
+      - name: stg_warehouses
+      - name: stg_suppliers
+      - name: stg_clients
+      - name: stg_managers
+      - name: stg_products
+      - name: stg_accounts
+      - name: stg_purchase_orders
+      - name: stg_purchase_order_lines
+      - name: stg_sales_orders
+      - name: stg_sales_order_lines
+      - name: stg_invoices
+      - name: stg_inventory_movements
+      - name: stg_gl_postings
+      - name: stg_marketing_spend

@@ -1,0 +1,676 @@
+version: 2
+
+models:
+  - name: ods_company
+    description: "Информация о компании ООО «ПромСнаб Групп». Единственная запись с реквизитами компании."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: company_id
+        description: "Уникальный идентификатор компании"
+        tests: [not_null]
+      - name: company_name
+        description: "Полное наименование компании"
+        tests: [not_null]
+      - name: company_short
+        description: "Краткое наименование компании"
+      - name: inn
+        description: "ИНН компании"
+        tests: [not_null]
+      - name: kpp
+        description: "КПП компании"
+      - name: legal_address
+        description: "Юридический адрес"
+      - name: industry
+        description: "Отрасль деятельности"
+      - name: base_currency
+        description: "Базовая валюта учёта"
+      - name: fiscal_year_start_month
+        description: "Месяц начала финансового года (1-12)"
+      - name: fiscal_year_end_month
+        description: "Месяц окончания финансового года (предыдущий от start)"
+      - name: founded_at
+        description: "Дата основания компании"
+        tests: [not_null]
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+
+  - name: ods_warehouses
+    description: "Справочник складов компании. Очищенный и дедублицированный слой складов."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: warehouse_id
+        description: "Уникальный идентификатор склада"
+        tests: [not_null, unique]
+      - name: warehouse_code
+        description: "Код склада (нижний регистр)"
+        tests: [not_null]
+      - name: warehouse_name
+        description: "Наименование склада"
+      - name: address
+        description: "Адрес склада"
+      - name: region
+        description: "Регион расположения склада"
+      - name: is_active
+        description: "Флаг активности склада (0/1)"
+      - name: warehouse_tier
+        description: "Тир склада: primary (id=1) или secondary"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+
+  - name: ods_suppliers
+    description: "Справочник поставщиков. Дедублицирован, поля нормализованы."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: supplier_id
+        description: "Уникальный идентификатор поставщика"
+        tests: [not_null, unique]
+      - name: supplier_name
+        description: "Наименование поставщика"
+        tests: [not_null]
+      - name: supplier_code
+        description: "Код поставщика (нижний регистр)"
+      - name: country_code
+        description: "Код страны поставщика"
+      - name: payment_terms_days
+        description: "Срок оплаты в днях"
+      - name: credit_limit
+        description: "Кредитный лимит"
+      - name: status
+        description: "Статус поставщика (active/inactive/blocked)"
+        tests:
+          - accepted_values:
+              values: ['active', 'inactive', 'blocked']
+      - name: supplier_country_group
+        description: "Группа страны: domestic (RU) или foreign"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+
+  - name: ods_clients
+    description: "Справочник клиентов (дилеров). Дедублицирован, с сегментацией и DQ-флагами."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: client_id
+        description: "Уникальный идентификатор клиента"
+        tests: [not_null, unique]
+      - name: client_name
+        description: "Наименование клиента"
+        tests: [not_null]
+      - name: client_code
+        description: "Код клиента (нижний регистр)"
+      - name: client_type
+        description: "Тип клиента"
+      - name: segment
+        description: "Сегмент клиента (A/B/C)"
+        tests: [not_null]
+      - name: region
+        description: "Регион клиента"
+        tests: [not_null]
+      - name: inn
+        description: "ИНН клиента"
+      - name: payment_terms_days
+        description: "Срок оплаты в днях"
+      - name: credit_limit
+        description: "Кредитный лимит"
+      - name: assigned_manager_id
+        description: "ID закреплённого менеджера"
+      - name: warehouse_id
+        description: "ID склада отгрузки"
+      - name: status
+        description: "Статус клиента (active/inactive)"
+        tests:
+          - accepted_values:
+              values: ['active', 'inactive']
+      - name: registered_at
+        description: "Дата регистрации клиента"
+      - name: segment_label
+        description: "Человекочитаемая метка сегмента: Крупный/Средний/Мелкий"
+      - name: days_since_registration
+        description: "Дней с момента регистрации клиента"
+      - name: dq_has_manager
+        description: "Флаг качества: прикреплён ли менеджер (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - accepted_values:
+          column: segment
+          values: ['A', 'B', 'C']
+
+  - name: ods_managers
+    description: "Справочник менеджеров. Дедублицирован, с вычислением стажа."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: manager_id
+        description: "Уникальный идентификатор менеджера"
+        tests: [not_null, unique]
+      - name: full_name
+        description: "ФИО менеджера"
+        tests: [not_null]
+      - name: department
+        description: "Отдел менеджера"
+      - name: region
+        description: "Регион работы менеджера"
+      - name: hire_date
+        description: "Дата найма"
+      - name: status
+        description: "Статус менеджера"
+      - name: tenure_days
+        description: "Стаж работы в днях"
+      - name: tenure_group
+        description: "Группа стажа: <1yr / 1-3yr / 3-5yr / 5+yr"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+
+  - name: ods_products
+    description: "Справочник товаров. Дедублицирован, с маржинальностью и ценой с НДС."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: product_id
+        description: "Уникальный идентификатор товара"
+        tests: [not_null, unique]
+      - name: sku_code
+        description: "SKU код товара (нижний регистр)"
+        tests: [not_null, unique]
+      - name: product_name
+        description: "Наименование товара"
+      - name: brand
+        description: "Бренд товара"
+      - name: category
+        description: "Категория товара"
+        tests: [not_null]
+      - name: subcategory
+        description: "Подкатегория товара"
+      - name: unit_of_measure
+        description: "Единица измерения"
+      - name: pack_size
+        description: "Фасовка"
+      - name: base_price
+        description: "Базовая цена продажи"
+        tests: [not_null]
+      - name: purchase_price
+        description: "Закупочная цена"
+        tests: [not_null]
+      - name: vat_rate
+        description: "Ставка НДС"
+      - name: min_order_qty
+        description: "Минимальное количество заказа"
+      - name: supplier_id
+        description: "ID поставщика товара"
+      - name: warehouse_id
+        description: "ID склада хранения"
+      - name: is_active
+        description: "Флаг активности товара (0/1)"
+      - name: launched_at
+        description: "Дата запуска товара"
+      - name: margin_pct
+        description: "Маржинальность в процентах"
+      - name: margin_group
+        description: "Группа маржинальности: high (>=25%) / mid (>=15%) / low"
+      - name: price_with_vat
+        description: "Цена с НДС"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - not_null:
+          column_name: base_price
+      - not_null:
+          column_name: purchase_price
+
+  - name: ods_accounts
+    description: "План счетов бухгалтерского учёта. Эталонный справочник с группировками."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: account_id
+        description: "Уникальный идентификатор счёта"
+        tests: [not_null, unique]
+      - name: account_code
+        description: "Код счёта (нижний регистр)"
+        tests: [not_null, unique]
+      - name: account_name
+        description: "Наименование счёта"
+        tests: [not_null]
+      - name: account_type
+        description: "Тип счёта (Asset/Liability/Equity/Revenue/Expense)"
+        tests: [not_null]
+      - name: statement_type
+        description: "Тип отчётности (PL/BS)"
+        tests:
+          - accepted_values:
+              values: ['pl', 'bs']
+      - name: bs_group
+        description: "Группа баланса"
+      - name: cf_section
+        description: "Раздел отчёта о движении денег"
+      - name: pl_group
+        description: "Группа ОПУ"
+      - name: pl_sign
+        description: "Знак для ОПУ: +1/-1 (доход/расход)"
+      - name: is_monetary
+        description: "Флаг денежного счёта (0/1)"
+      - name: normal_balance
+        description: "Сальдо по умолчанию (Debit/Credit)"
+        tests:
+          - accepted_values:
+              values: ['debit', 'credit']
+      - name: dq_valid_stmt_type
+        description: "Флаг качества: корректный statement_type (PL/BS)"
+      - name: pl_group_label
+        description: "Человекочитаемая метка группы ОПУ"
+      - name: bs_group_label
+        description: "Человекочитаемая метка группы баланса"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - accepted_values:
+          column: account_type
+          values: ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense']
+
+  - name: ods_purchase_orders
+    description: "Заказы поставщикам (PO). Транзакционный слой с метриками своевременности."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: po_id
+        description: "Уникальный идентификатор заказа поставщику"
+        tests: [not_null, unique]
+      - name: po_code
+        description: "Номер заказа поставщику"
+      - name: supplier_id
+        description: "ID поставщика"
+        tests: [not_null]
+      - name: warehouse_id
+        description: "ID склада доставки"
+      - name: po_date
+        description: "Дата заказа"
+        tests: [not_null]
+      - name: expected_delivery
+        description: "Ожидаемая дата поставки"
+      - name: actual_delivery
+        description: "Фактическая дата поставки"
+      - name: status
+        description: "Статус заказа (delivered/partial/cancelled/pending)"
+        tests:
+          - accepted_values:
+              values: ['delivered', 'partial', 'cancelled', 'pending']
+      - name: currency_code
+        description: "Код валюты"
+      - name: total_amount
+        description: "Общая сумма заказа"
+        tests: [not_null]
+      - name: delivery_delay_days
+        description: "Задержка поставки в днях (NULL если нет фактической даты)"
+      - name: is_on_time
+        description: "Флаг своевременности: 1/0/NULL"
+      - name: dq_has_delivery
+        description: "Флаг: есть ли фактическая дата поставки (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - expression_is_true:
+          name: test_po_amount_non_negative
+          expression: total_amount >= 0
+
+  - name: ods_purchase_order_lines
+    description: "Строки заказов поставщикам. Детализация по товарам и количеству."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: po_line_id
+        description: "Уникальный идентификатор строки заказа"
+        tests: [not_null, unique]
+      - name: po_id
+        description: "ID заказа поставщику"
+        tests: [not_null]
+      - name: product_id
+        description: "ID товара"
+        tests: [not_null]
+      - name: sku_code
+        description: "SKU код (нижний регистр)"
+      - name: category
+        description: "Категория товара в строке"
+      - name: quantity
+        description: "Заказанное количество"
+        tests: [not_null]
+      - name: unit_price
+        description: "Цена за единицу"
+        tests: [not_null]
+      - name: line_amount
+        description: "Сумма строки"
+      - name: received_qty
+        description: "Фактически полученное количество"
+      - name: receipt_pct
+        description: "Процент выполнения поставки"
+      - name: dq_qty_mismatch
+        description: "Флаг: получено больше заказанного (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+
+  - name: ods_sales_orders
+    description: "Заказы клиентов. Транзакционный слой с временными измерениями."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: order_id
+        description: "Уникальный идентификатор заказа клиента"
+        tests: [not_null, unique]
+      - name: order_code
+        description: "Номер заказа"
+      - name: client_id
+        description: "ID клиента"
+        tests: [not_null]
+      - name: manager_id
+        description: "ID менеджера"
+      - name: warehouse_id
+        description: "ID склада отгрузки"
+      - name: order_date
+        description: "Дата заказа"
+        tests: [not_null]
+      - name: shipment_date
+        description: "Дата отгрузки"
+      - name: status
+        description: "Статус заказа (completed/partial/cancelled)"
+        tests:
+          - accepted_values:
+              values: ['completed', 'partial', 'cancelled']
+      - name: payment_status
+        description: "Статус оплаты (paid/partial/unpaid)"
+        tests:
+          - accepted_values:
+              values: ['paid', 'partial', 'unpaid']
+      - name: currency_code
+        description: "Код валюты"
+      - name: discount_pct
+        description: "Процент скидки"
+      - name: total_amount
+        description: "Общая сумма заказа"
+        tests: [not_null]
+      - name: order_month
+        description: "Месяц заказа (StartOfMonth)"
+      - name: order_year
+        description: "Год заказа"
+      - name: order_quarter
+        description: "Квартал заказа"
+      - name: day_of_week
+        description: "День недели (1=Пн..7=Вс)"
+      - name: is_weekend
+        description: "Флаг выходного дня (0/1)"
+      - name: shipment_lag_days
+        description: "Дней между заказом и отгрузкой"
+      - name: dq_valid_amount
+        description: "Флаг: сумма > 0 (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - expression_is_true:
+          name: test_so_amount_non_negative
+          expression: total_amount >= 0
+
+  - name: ods_sales_order_lines
+    description: "Строки заказов клиентов. Детализация продаж с маржинальностью."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: order_line_id
+        description: "Уникальный идентификатор строки заказа"
+        tests: [not_null, unique]
+      - name: order_id
+        description: "ID заказа клиента"
+        tests: [not_null]
+      - name: product_id
+        description: "ID товара"
+        tests: [not_null]
+      - name: sku_code
+        description: "SKU код (нижний регистр)"
+      - name: category
+        description: "Категория товара"
+      - name: brand
+        description: "Бренд товара"
+      - name: quantity
+        description: "Количество"
+        tests: [not_null]
+      - name: unit_price
+        description: "Цена за единицу"
+        tests: [not_null]
+      - name: unit_cost
+        description: "Себестоимость единицы"
+      - name: line_revenue
+        description: "Выручка по строке"
+      - name: line_cogs
+        description: "Себестоимость по строке"
+      - name: line_gross_profit
+        description: "Валовая прибыль по строке"
+      - name: gross_margin_pct
+        description: "Процент валовой маржи"
+      - name: dq_negative_margin
+        description: "Флаг: отрицательная маржа (0/1)"
+      - name: dq_zero_price
+        description: "Флаг: нулевая цена (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+
+  - name: ods_invoices
+    description: "Счета (дебиторские/кредиторские). С ageing-анализом и метриками взыскания."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: invoice_id
+        description: "Уникальный идентификатор счёта"
+        tests: [not_null, unique]
+      - name: invoice_code
+        description: "Номер счёта"
+      - name: invoice_type
+        description: "Тип счёта (AR/AP)"
+        tests: [not_null]
+      - name: counterparty_id
+        description: "ID контрагента"
+      - name: counterparty_type
+        description: "Тип контрагента (client/supplier)"
+      - name: order_id
+        description: "ID связанного заказа"
+      - name: invoice_date
+        description: "Дата счёта"
+        tests: [not_null]
+      - name: due_date
+        description: "Дата оплаты по сроку"
+      - name: currency_code
+        description: "Код валюты"
+      - name: amount
+        description: "Сумма счёта"
+        tests: [not_null]
+      - name: paid_amount
+        description: "Оплаченная сумма"
+      - name: outstanding
+        description: "Задолженность"
+      - name: days_overdue
+        description: "Дней просрочки (отрицательное = ещё не срок)"
+      - name: status
+        description: "Статус счёта"
+      - name: aging_bucket
+        description: "Категория просрочки: Current/1-30d/31-60d/61-90d/90d+"
+        tests:
+          - accepted_values:
+              values: ['Current', '1-30d', '31-60d', '61-90d', '90d+']
+      - name: collection_rate
+        description: "Процент взыскания"
+      - name: is_overdue
+        description: "Флаг просрочки (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - accepted_values:
+          column: invoice_type
+          values: ['ar', 'ap']
+
+  - name: ods_inventory_movements
+    description: "Движения товаров на складах. Стоимостная оценка и направления."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: move_id
+        description: "Уникальный идентификатор движения"
+        tests: [not_null, unique]
+      - name: move_type
+        description: "Тип движения (receipt/shipment/writeoff/adjustment)"
+        tests:
+          - accepted_values:
+              values: ['receipt', 'shipment', 'writeoff', 'adjustment']
+      - name: reference_type
+        description: "Тип документа-основания"
+      - name: reference_id
+        description: "ID документа-основания"
+      - name: product_id
+        description: "ID товара"
+        tests: [not_null]
+      - name: warehouse_id
+        description: "ID склада"
+        tests: [not_null]
+      - name: quantity
+        description: "Количество (положительное = приход, отрицательное = расход)"
+        tests: [not_null]
+      - name: unit_cost
+        description: "Себестоимость единицы"
+      - name: move_date
+        description: "Дата движения"
+        tests: [not_null]
+      - name: movement_value
+        description: "Стоимостная оценка движения (quantity * unit_cost)"
+      - name: move_direction
+        description: "Направление: in/out"
+      - name: dq_zero_cost
+        description: "Флаг: нулевая себестоимость (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+
+  - name: ods_gl_postings
+    description: "Проводки главной книги. Обогащены данными плана счетов."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: gl_id
+        description: "Уникальный идентификатор проводки"
+        tests: [not_null, unique]
+      - name: posting_date
+        description: "Дата проводки"
+        tests: [not_null]
+      - name: doc_type
+        description: "Тип документа"
+      - name: account_id
+        description: "ID счёта"
+        tests: [not_null]
+      - name: contra_account_id
+        description: "ID корреспондирующего счёта"
+      - name: amount_base
+        description: "Сумма проводки"
+        tests: [not_null]
+      - name: currency_code
+        description: "Код валюты"
+      - name: description
+        description: "Описание проводки"
+      - name: scenario_id
+        description: "ID сценария (1/2/3)"
+        tests:
+          - accepted_values:
+              values: [1, 2, 3]
+      - name: statement_type
+        description: "Тип отчётности счёта (PL/BS) — из ods_accounts"
+      - name: pl_group
+        description: "Группа ОПУ счёта — из ods_accounts"
+      - name: pl_sign
+        description: "Знак ОПУ (+1/-1) — из ods_accounts"
+      - name: bs_group
+        description: "Группа баланса счёта — из ods_accounts"
+      - name: cf_section
+        description: "Раздел ДДС — из ods_accounts"
+      - name: is_monetary
+        description: "Флаг денежного счёта — из ods_accounts"
+      - name: normal_balance
+        description: "Сальдо по умолчанию — из ods_accounts"
+      - name: signed_amount
+        description: "Сумма с учётом знака ОПУ (NULL для балансовых счетов)"
+      - name: posting_month
+        description: "Месяц проводки (StartOfMonth)"
+      - name: posting_year
+        description: "Год проводки"
+      - name: dq_missing_account
+        description: "Флаг: счёт не найден в ods_accounts (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - expression_is_true:
+          name: test_gl_amount_non_negative
+          expression: amount_base >= 0
+
+  - name: ods_marketing_spend
+    description: "Маркетинговые расходы по кампаниям. С метриками эффективности (CTR, CPC, CPA)."
+    meta:
+      owner: analytics_team
+      layer: ods
+    columns:
+      - name: spend_id
+        description: "Уникальный идентификатор расхода"
+        tests: [not_null, unique]
+      - name: campaign_id
+        description: "ID кампании"
+      - name: campaign_name
+        description: "Название кампании"
+      - name: platform
+        description: "Платформа размещения"
+        tests: [not_null]
+      - name: spend_date
+        description: "Дата расхода"
+        tests: [not_null]
+      - name: impressions
+        description: "Количество показов"
+      - name: clicks
+        description: "Количество кликов"
+      - name: conversions
+        description: "Количество конверсий"
+      - name: spend_amount
+        description: "Сумма расхода"
+        tests: [not_null]
+      - name: currency_code
+        description: "Код валюты"
+      - name: ctr
+        description: "Click-through rate (%)"
+      - name: conversion_rate
+        description: "Conversion rate (%)"
+      - name: cpc
+        description: "Cost per click"
+      - name: cpa
+        description: "Cost per acquisition"
+      - name: spend_month
+        description: "Месяц расхода (StartOfMonth)"
+      - name: dq_zero_spend
+        description: "Флаг: нулевой расход (0/1)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи"
+    tests:
+      - expression_is_true:
+          name: test_spend_amount_non_negative
+          expression: spend_amount >= 0
+      - expression_is_true:
+          name: test_impressions_non_negative
+          expression: impressions >= 0
+      - expression_is_true:
+          name: test_clicks_non_negative
+          expression: clicks >= 0

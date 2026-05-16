@@ -1,0 +1,800 @@
+version: 2
+
+models:
+
+  # ════════════════════════════════════════════════════════════════
+  # DIMENSIONS
+  # ════════════════════════════════════════════════════════════════
+
+  - name: dim_date
+    description: "Календарный справочник. Сгенерированная временная шкала с 2020-01-01 по 2030-12-31. Каждая строка — один день. Используется всеми фактовыми таблицами для FK-связи по дате."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один календарный день"
+    tags: ["dds", "dim"]
+    columns:
+      - name: date_id
+        description: "Уникальный идентификатор даты в формате YYYYMMDD (Int32). Пример: 20230115 = 15 января 2023."
+        tests: [not_null, unique]
+      - name: date_actual
+        description: "Фактическая дата (Date)."
+        tests: [not_null, unique]
+      - name: year
+        description: "Год (UInt16)."
+      - name: quarter
+        description: "Квартал (1-4)."
+      - name: month
+        description: "Месяц (1-12)."
+      - name: month_name
+        description: "Название месяца на русском (LowCardinality)."
+      - name: week_of_year
+        description: "ISO-неделя года (UInt8)."
+      - name: day_of_month
+        description: "День месяца (1-31)."
+      - name: day_of_week
+        description: "День недели (1=Пн .. 7=Вс)."
+      - name: day_name
+        description: "Название дня недели на русском (LowCardinality)."
+      - name: is_weekend
+        description: "Флаг выходного дня (1=Сб/Вс)."
+      - name: is_month_end
+        description: "Флаг последнего дня месяца."
+      - name: is_quarter_end
+        description: "Флаг последнего дня квартала (месяц 3,6,9,12 + последний день)."
+      - name: is_year_end
+        description: "Флаг последнего дня года (31 декабря)."
+      - name: season
+        description: "Сезон (Зима/Весна/Лето/Осень)."
+      - name: half_year
+        description: "Полугодие (1 или 2)."
+      - name: ytd_day_number
+        description: "Порядковый номер дня в году (1-366)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки записи (UInt32)."
+
+  - name: dim_company
+    description: "Информация о компании ООО «ПромСнаб Групп». Единственная запись. Источник: ods_company."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Одна компания"
+    tags: ["dds", "dim"]
+    columns:
+      - name: company_id
+        description: "Уникальный идентификатор компании."
+        tests: [not_null, unique]
+      - name: company_name
+        description: "Полное наименование компании."
+        tests: [not_null]
+      - name: company_short
+        description: "Краткое наименование."
+      - name: inn
+        description: "ИНН компании."
+        tests: [not_null]
+      - name: kpp
+        description: "КПП компании."
+      - name: legal_address
+        description: "Юридический адрес."
+      - name: industry
+        description: "Отрасль."
+      - name: base_currency
+        description: "Базовая валюта учёта."
+      - name: fiscal_year_start_month
+        description: "Месяц начала финансового года."
+      - name: fiscal_year_end_month
+        description: "Месяц окончания финансового года (start - 1, 12 если start=1)."
+      - name: founded_at
+        description: "Дата основания."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dim_warehouse
+    description: "Справочник складов. Источник: ods_warehouses. SCD Type 1 через ReplacingMergeTree."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один склад"
+    tags: ["dds", "dim"]
+    columns:
+      - name: warehouse_id
+        description: "ID склада."
+        tests: [not_null, unique]
+      - name: warehouse_code
+        description: "Код склада (нижний регистр)."
+        tests: [not_null]
+      - name: warehouse_name
+        description: "Наименование склада."
+        tests: [not_null]
+      - name: address
+        description: "Адрес склада."
+      - name: region
+        description: "Регион."
+      - name: is_active
+        description: "Флаг активности (UInt8: 0/1)."
+      - name: warehouse_tier
+        description: "Тир склада: primary (id=1) / secondary."
+      - name: is_primary
+        description: "Флаг основного склада (1 если warehouse_id=1)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dim_supplier
+    description: "Справочник поставщиков. Источник: ods_suppliers. Дедублицирован."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один поставщик"
+    tags: ["dds", "dim"]
+    columns:
+      - name: supplier_id
+        description: "ID поставщика."
+        tests: [not_null, unique]
+      - name: supplier_name
+        description: "Наименование поставщика."
+        tests: [not_null]
+      - name: supplier_code
+        description: "Код поставщика (нижний регистр)."
+      - name: country_code
+        description: "Код страны."
+      - name: payment_terms_days
+        description: "Срок оплаты (дни)."
+      - name: credit_limit
+        description: "Кредитный лимит (Decimal(18,2))."
+      - name: status
+        description: "Статус (active/inactive/blocked)."
+        tests:
+          - accepted_values:
+              values: ['active', 'inactive', 'blocked']
+      - name: supplier_country_group
+        description: "Группа страны: domestic (RU) / foreign."
+        tests:
+          - accepted_values:
+              values: ['domestic', 'foreign']
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dim_client
+    description: "Справочник клиентов (дилеров). Источник: ods_clients. С ltv_tier-заглушкой для DM-слоя."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один клиент"
+    tags: ["dds", "dim"]
+    columns:
+      - name: client_id
+        description: "ID клиента."
+        tests: [not_null, unique]
+      - name: client_name
+        description: "Наименование клиента."
+        tests: [not_null]
+      - name: client_code
+        description: "Код клиента (нижний регистр)."
+      - name: client_type
+        description: "Тип клиента."
+      - name: segment
+        description: "Сегмент (A/B/C)."
+        tests: [not_null]
+      - name: region
+        description: "Регион клиента."
+        tests: [not_null]
+      - name: inn
+        description: "ИНН клиента."
+      - name: payment_terms_days
+        description: "Срок оплаты (дни)."
+      - name: credit_limit
+        description: "Кредитный лимит (Decimal(18,2))."
+      - name: assigned_manager_id
+        description: "ID закреплённого менеджера."
+      - name: warehouse_id
+        description: "ID склада отгрузки."
+      - name: status
+        description: "Статус (active/inactive)."
+      - name: registered_at
+        description: "Дата регистрации."
+      - name: segment_label
+        description: "Метка сегмента (Крупный/Средний/Мелкий)."
+        tests:
+          - accepted_values:
+              values: ['Крупный', 'Средний', 'Мелкий']
+      - name: days_since_registration
+        description: "Дней с даты регистрации."
+      - name: dq_has_manager
+        description: "Флаг наличия менеджера (0/1)."
+      - name: ltv_tier
+        description: "Заглушка LTV-тира (будет заполнена в DM-слое)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - accepted_values:
+          column: segment
+          values: ['A', 'B', 'C']
+
+  - name: dim_manager
+    description: "Справочник менеджеров. Источник: ods_managers. Со стажем и группой стажа."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один менеджер"
+    tags: ["dds", "dim"]
+    columns:
+      - name: manager_id
+        description: "ID менеджера."
+        tests: [not_null, unique]
+      - name: full_name
+        description: "ФИО менеджера."
+        tests: [not_null]
+      - name: department
+        description: "Отдел."
+      - name: region
+        description: "Регион работы."
+      - name: hire_date
+        description: "Дата найма."
+      - name: status
+        description: "Статус."
+      - name: tenure_days
+        description: "Стаж в днях."
+      - name: tenure_group
+        description: "Группа стажа (<1yr / 1-3yr / 3-5yr / 5+yr)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dim_product
+    description: "Справочник товаров. Источник: ods_products. С флагом high-margin и abc_class-заглушкой."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один товар (SKU)"
+    tags: ["dds", "dim"]
+    columns:
+      - name: product_id
+        description: "ID товара."
+        tests: [not_null, unique]
+      - name: sku_code
+        description: "SKU код (нижний регистр)."
+        tests: [not_null, unique]
+      - name: product_name
+        description: "Наименование."
+      - name: brand
+        description: "Бренд."
+      - name: category
+        description: "Категория товара."
+        tests: [not_null]
+      - name: subcategory
+        description: "Подкатегория."
+      - name: unit_of_measure
+        description: "Единица измерения."
+      - name: pack_size
+        description: "Фасовка."
+      - name: base_price
+        description: "Базовая цена (Decimal(18,2))."
+        tests: [not_null]
+      - name: purchase_price
+        description: "Закупочная цена (Decimal(18,2))."
+      - name: vat_rate
+        description: "Ставка НДС (Float32)."
+      - name: min_order_qty
+        description: "Мин. количество заказа."
+      - name: supplier_id
+        description: "ID поставщика."
+      - name: warehouse_id
+        description: "ID склада."
+      - name: is_active
+        description: "Флаг активности (UInt8)."
+      - name: launched_at
+        description: "Дата запуска."
+      - name: margin_pct
+        description: "Маржинальность (%: 2 знака)."
+      - name: margin_group
+        description: "Группа маржинальности (high/mid/low)."
+      - name: price_with_vat
+        description: "Цена с НДС."
+      - name: is_high_margin
+        description: "Флаг высокой маржинальности (margin_group='high')."
+      - name: abc_class
+        description: "Заглушка ABC-класса (заполняется в DM)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dim_account
+    description: "План счетов. Ключевой справочник для финансовых фактов. Источник: ods_accounts. С полным путём full_account_path."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один бухгалтерский счёт"
+    tags: ["dds", "dim"]
+    columns:
+      - name: account_id
+        description: "ID счёта."
+        tests: [not_null, unique]
+      - name: account_code
+        description: "Код счёта (нижний регистр)."
+        tests: [not_null, unique]
+      - name: account_name
+        description: "Наименование счёта."
+        tests: [not_null]
+      - name: account_type
+        description: "Тип счёта (Asset/Liability/Equity/Revenue/Expense)."
+        tests: [not_null]
+      - name: statement_type
+        description: "Тип отчётности (PL/BS)."
+        tests:
+          - accepted_values:
+              values: ['pl', 'bs']
+      - name: bs_group
+        description: "Группа баланса."
+      - name: cf_section
+        description: "Раздел ДДС."
+      - name: pl_group
+        description: "Группа ОПУ."
+      - name: pl_sign
+        description: "Знак ОПУ (+1/-1). Для BS-счетов может быть NULL."
+      - name: is_monetary
+        description: "Флаг денежного счёта (UInt8)."
+      - name: normal_balance
+        description: "Сальдо по умолчанию (debit/credit)."
+      - name: dq_valid_stmt_type
+        description: "Флаг корректного statement_type (0/1)."
+      - name: pl_group_label
+        description: "Человекочитаемая метка группы ОПУ (рус.)."
+      - name: bs_group_label
+        description: "Человекочитаемая метка группы баланса (рус.)."
+      - name: full_account_path
+        description: "Полный путь счёта: statement_type / [pl_group|bs_group|cf_section]. (LowCardinality)"
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dim_channel
+    description: "Справочник каналов продаж/маркетинга. Статический набор из 6 каналов."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один канал"
+    tags: ["dds", "dim"]
+    columns:
+      - name: channel_id
+        description: "ID канала."
+        tests: [not_null, unique]
+      - name: channel_code
+        description: "Код канала (DIRECT/ONLINE/MARKETPLACE/PARTNER/TELESALES/FIELD)."
+        tests: [not_null]
+      - name: channel_name
+        description: "Название канала на русском."
+        tests: [not_null]
+      - name: channel_type
+        description: "Тип канала (Sales/Digital/Indirect)."
+      - name: is_digital
+        description: "Флаг цифрового канала (1=Digital)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dim_scenario
+    description: "Справочник сценариев планирования. Статический набор (Факт/Бюджет/Прогноз/Перепрогноз)."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один сценарий"
+    tags: ["dds", "dim"]
+    columns:
+      - name: scenario_id
+        description: "ID сценария (1=Факт / 2=Бюджет / 3=Прогноз / 4=Перепрогноз)."
+        tests: [not_null, unique]
+      - name: scenario_code
+        description: "Код сценария (ACTUAL/BUDGET/FORECAST/REFORECAST)."
+        tests: [not_null]
+      - name: scenario_name
+        description: "Название сценария на русском."
+      - name: is_actual
+        description: "Флаг фактического сценария (1=Факт)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  # ════════════════════════════════════════════════════════════════
+  # FACTS
+  # ════════════════════════════════════════════════════════════════
+
+  - name: fct_gl_entry
+    description: "Проводки главной книги. Зерно: одна строка проводки (один GL entry). Обогащена данными из dim_account (statement_type, pl_group, pl_sign, bs_group). Источник: ods_gl_postings + dim_account + dim_date."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Одна строка бухгалтерской проводки"
+    tags: ["dds", "fct"]
+    columns:
+      - name: gl_id
+        description: "ID проводки (PK, UInt64)."
+        tests: [not_null, unique]
+      - name: date_id
+        description: "FK → dim_date.date_id."
+      - name: posting_date
+        description: "Дата проводки."
+        tests: [not_null]
+      - name: posting_month
+        description: "Месяц проводки (toStartOfMonth)."
+      - name: account_id
+        description: "FK → dim_account.account_id."
+        tests: [not_null]
+      - name: contra_account_id
+        description: "FK → dim_account (корреспондирующий счёт)."
+      - name: scenario_id
+        description: "FK → dim_scenario.scenario_id."
+      - name: doc_type
+        description: "Тип документа (LowCardinality)."
+      - name: description
+        description: "Описание проводки."
+      - name: statement_type
+        description: "Тип отчётности (PL/BS) — денормализовано из dim_account."
+      - name: pl_group
+        description: "Группа ОПУ — денормализовано из dim_account (LowCardinality)."
+      - name: pl_sign
+        description: "Знак ОПУ (+1/-1) — денормализовано из dim_account."
+      - name: bs_group
+        description: "Группа баланса — денормализовано из dim_account (LowCardinality)."
+      - name: cf_section
+        description: "Раздел ДДС — денормализовано из dim_account (LowCardinality)."
+      - name: is_monetary
+        description: "Флаг денежного счёта — денормализовано из dim_account."
+      - name: amount_base
+        description: "Сумма проводки (Decimal(18,2))."
+        tests: [not_null]
+      - name: signed_amount
+        description: "Сумма с учётом знака ОПУ (amount_base * pl_sign). NULL для BS-счетов."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - expression_is_true:
+          name: test_fct_gl_amount_non_negative
+          expression: amount_base >= 0
+
+  - name: fct_sales_order_line
+    description: "Строки заказов клиентов. Зерно: одна строка заказа. Обогащена данными клиента, товара, менеджера, склада и даты. Источник: ods_sales_order_lines + ods_sales_orders + dims."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Одна строка заказа клиента"
+    tags: ["dds", "fct"]
+    columns:
+      - name: order_line_id
+        description: "ID строки заказа (PK, UInt64)."
+        tests: [not_null, unique]
+      - name: order_id
+        description: "ID заказа (UInt64)."
+        tests: [not_null]
+      - name: date_id
+        description: "FK → dim_date.date_id (по order_date)."
+      - name: order_date
+        description: "Дата заказа."
+        tests: [not_null]
+      - name: order_month
+        description: "Месяц заказа."
+      - name: order_year
+        description: "Год заказа."
+      - name: order_quarter
+        description: "Квартал заказа."
+      - name: client_id
+        description: "FK → dim_client.client_id."
+        tests: [not_null]
+      - name: manager_id
+        description: "FK → dim_manager.manager_id (может быть NULL)."
+      - name: warehouse_id
+        description: "FK → dim_warehouse.warehouse_id (может быть NULL)."
+      - name: product_id
+        description: "FK → dim_product.product_id."
+        tests: [not_null]
+      - name: scenario_id
+        description: "Всегда 1 (Факт) для продаж."
+      - name: client_segment
+        description: "Сегмент клиента — денормализовано (LowCardinality)."
+      - name: client_region
+        description: "Регион клиента — денормализовано (LowCardinality)."
+      - name: product_category
+        description: "Категория товара — денормализовано (LowCardinality)."
+      - name: product_brand
+        description: "Бренд товара — денормализовано (LowCardinality)."
+      - name: margin_group
+        description: "Группа маржи — денормализовано (LowCardinality)."
+      - name: quantity
+        description: "Количество (UInt32)."
+        tests: [not_null]
+      - name: unit_price
+        description: "Цена за единицу (Decimal(18,2))."
+      - name: unit_cost
+        description: "Себестоимость единицы (Decimal(18,2))."
+      - name: discount_pct
+        description: "Процент скидки (Decimal(6,4))."
+      - name: line_revenue
+        description: "Выручка по строке (Decimal(18,2))."
+        tests: [not_null]
+      - name: line_cogs
+        description: "Себестоимость по строке (Decimal(18,2))."
+      - name: line_gross_profit
+        description: "Валовая прибыль (Decimal(18,2))."
+      - name: gross_margin_pct
+        description: "Процент валовой маржи (Decimal(6,2))."
+      - name: order_status
+        description: "Статус заказа (LowCardinality)."
+      - name: payment_status
+        description: "Статус оплаты (LowCardinality)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - expression_is_true:
+          name: test_fct_so_line_revenue_non_negative
+          expression: line_revenue >= 0
+      - expression_is_true:
+          name: test_fct_so_quantity_positive
+          expression: quantity > 0
+
+  - name: fct_purchase_order_line
+    description: "Строки заказов поставщикам. Зерно: одна строка PO. Обогащена данными поставщика, товара и склада. Источник: ods_purchase_order_lines + ods_purchase_orders + dims."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Одна строка заказа поставщику"
+    tags: ["dds", "fct"]
+    columns:
+      - name: po_line_id
+        description: "ID строки PO (PK, UInt64)."
+        tests: [not_null, unique]
+      - name: po_id
+        description: "ID заказа (UInt64)."
+        tests: [not_null]
+      - name: date_id
+        description: "FK → dim_date.date_id (по po_date)."
+      - name: po_date
+        description: "Дата заказа."
+        tests: [not_null]
+      - name: po_month
+        description: "Месяц заказа."
+      - name: supplier_id
+        description: "FK → dim_supplier.supplier_id."
+        tests: [not_null]
+      - name: warehouse_id
+        description: "FK → dim_warehouse.warehouse_id (может быть NULL)."
+      - name: product_id
+        description: "FK → dim_product.product_id."
+        tests: [not_null]
+      - name: supplier_name
+        description: "Наименование поставщика — денормализовано."
+      - name: supplier_country_group
+        description: "Группа страны поставщика — денормализовано (LowCardinality)."
+      - name: product_category
+        description: "Категория товара — денормализовано (LowCardinality)."
+      - name: product_brand
+        description: "Бренд товара — денормализовано (LowCardinality)."
+      - name: quantity
+        description: "Заказанное количество (UInt32)."
+        tests: [not_null]
+      - name: received_qty
+        description: "Фактически полученное количество (UInt32)."
+      - name: unit_price
+        description: "Цена за единицу (Decimal(18,2))."
+      - name: line_amount
+        description: "Сумма строки (Decimal(18,2))."
+      - name: receipt_pct
+        description: "Процент выполнения поставки (Decimal(5,1))."
+      - name: po_status
+        description: "Статус PO (LowCardinality)."
+      - name: is_on_time
+        description: "Флаг своевременности (UInt8: 0/1)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - expression_is_true:
+          name: test_fct_po_quantity_positive
+          expression: quantity > 0
+      - expression_is_true:
+          name: test_fct_po_line_amount_non_negative
+          expression: line_amount >= 0
+
+  - name: fct_invoice
+    description: "Счета AR/AP. Зерно: один счёт. Обогащена данными контрагента (клиент/поставщик) через условный JOIN. Источник: ods_invoices + dim_client + dim_supplier + dim_date."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один счёт (дебиторский или кредиторский)"
+    tags: ["dds", "fct"]
+    columns:
+      - name: invoice_id
+        description: "ID счёта (PK, UInt64)."
+        tests: [not_null, unique]
+      - name: date_id
+        description: "FK → dim_date.date_id (по invoice_date)."
+      - name: invoice_date
+        description: "Дата счёта."
+        tests: [not_null]
+      - name: due_date
+        description: "Дата оплаты по сроку."
+      - name: invoice_month
+        description: "Месяц счёта."
+      - name: invoice_type
+        description: "Тип счёта (AR/AP)."
+        tests: [not_null]
+      - name: counterparty_id
+        description: "ID контрагента (UInt32)."
+      - name: counterparty_type
+        description: "Тип контрагента (client/supplier, LowCardinality)."
+      - name: counterparty_name
+        description: "Наименование контрагента (из dim_client или dim_supplier)."
+      - name: counterparty_segment
+        description: "Сегмент контрагента (только для AR, может быть NULL)."
+      - name: counterparty_region
+        description: "Регион контрагента (только для AR, может быть NULL)."
+      - name: amount
+        description: "Сумма счёта (Decimal(18,2))."
+        tests: [not_null]
+      - name: paid_amount
+        description: "Оплаченная сумма (Decimal(18,2))."
+      - name: outstanding
+        description: "Задолженность (Decimal(18,2))."
+      - name: days_overdue
+        description: "Дней просрочки (Int32: отр. = ещё не срок)."
+      - name: collection_rate
+        description: "Процент взыскания (Decimal(5,1))."
+      - name: aging_bucket
+        description: "Категория просрочки (Current/1-30d/31-60d/61-90d/90d+, LowCardinality)."
+        tests:
+          - accepted_values:
+              values: ['Current', '1-30d', '31-60d', '61-90d', '90d+']
+      - name: is_overdue
+        description: "Флаг просрочки (UInt8: 0/1)."
+      - name: status
+        description: "Статус счёта (LowCardinality)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - accepted_values:
+          column: invoice_type
+          values: ['ar', 'ap']
+      - expression_is_true:
+          name: test_fct_inv_amount_non_negative
+          expression: amount >= 0
+      - expression_is_true:
+          name: test_fct_inv_outstanding_non_negative
+          expression: outstanding >= 0
+
+  - name: fct_marketing_spend
+    description: "Маркетинговые расходы. Зерно: один день × одна кампания × одна платформа. Источник: ods_marketing_spend + dim_date."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один день × кампания × платформа"
+    tags: ["dds", "fct"]
+    columns:
+      - name: spend_id
+        description: "ID расхода (PK, UInt64)."
+        tests: [not_null, unique]
+      - name: date_id
+        description: "FK → dim_date.date_id."
+      - name: spend_date
+        description: "Дата расхода."
+        tests: [not_null]
+      - name: spend_month
+        description: "Месяц расхода."
+      - name: spend_year
+        description: "Год расхода."
+      - name: spend_quarter
+        description: "Квартал расхода."
+      - name: campaign_id
+        description: "ID кампании (UInt32)."
+      - name: campaign_name
+        description: "Название кампании."
+      - name: campaign_type
+        description: "Тип кампании (заглушка 'unknown', будет заполнена)."
+      - name: platform
+        description: "Платформа размещения (LowCardinality)."
+      - name: impressions
+        description: "Количество показов (UInt32)."
+      - name: clicks
+        description: "Количество кликов (UInt32)."
+      - name: conversions
+        description: "Количество конверсий (UInt32)."
+      - name: spend_amount
+        description: "Сумма расхода (Decimal(18,2))."
+        tests: [not_null]
+      - name: ctr
+        description: "Click-through rate, % (Decimal(6,3))."
+      - name: conversion_rate
+        description: "Conversion rate, % (Decimal(6,3))."
+      - name: cpc
+        description: "Cost per click (Decimal(10,2))."
+      - name: cpa
+        description: "Cost per acquisition (Decimal(10,2))."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - expression_is_true:
+          name: test_fct_mkt_spend_amount_non_negative
+          expression: spend_amount >= 0
+      - expression_is_true:
+          name: test_fct_mkt_impressions_non_negative
+          expression: impressions >= 0
+
+  # ════════════════════════════════════════════════════════════════
+  # INTERMEDIATE
+  # ════════════════════════════════════════════════════════════════
+
+  - name: int_pnl_monthly
+    description: "Помесячная агрегация P&L по счетам/сценариям. Используется DM слоем для построения отчёта о прибылях и убытках. Только проводки с statement_type='pl'. Источник: fct_gl_entry."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один месяц × счёт × сценарий"
+    tags: ["dds", "intermediate"]
+    columns:
+      - name: period
+        description: "Период (первый день месяца, Date)."
+      - name: year
+        description: "Год (UInt16)."
+      - name: quarter
+        description: "Квартал (UInt8)."
+      - name: account_id
+        description: "FK → dim_account.account_id (UInt32)."
+      - name: pl_group
+        description: "Группа ОПУ (LowCardinality)."
+      - name: scenario_id
+        description: "FK → dim_scenario.scenario_id (UInt8)."
+      - name: total_signed
+        description: "Сумма signed_amount за период (Decimal(18,2))."
+      - name: total_raw
+        description: "Сумма amount_base за период (Decimal(18,2))."
+      - name: posting_count
+        description: "Количество проводок (UInt32)."
+
+  - name: int_balance_monthly
+    description: "Помесячный баланс (BS) — остатки на конец месяца по счетам. Используется DM слоем для балансовых отчётов. Только проводки с statement_type='bs'. Источник: fct_gl_entry."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один месяц × счёт × сценарий (остаток на конец месяца)"
+    tags: ["dds", "intermediate"]
+    columns:
+      - name: period
+        description: "Период (последний день месяца, Date)."
+      - name: account_id
+        description: "FK → dim_account.account_id (UInt32)."
+      - name: bs_group
+        description: "Группа баланса (LowCardinality)."
+      - name: scenario_id
+        description: "FK → dim_scenario.scenario_id (UInt8)."
+      - name: ending_balance
+        description: "Исходящий остаток (Decimal(18,2)). Рассчитан как amount_base * знак (debit=+1, credit=-1)."
+
+  - name: int_sales_monthly
+    description: "Помесячная агрегация продаж по клиентам/товарам. Исключены cancelled-заказы. Используется DM слоем для анализа продаж и маркетинга. Источник: fct_sales_order_line."
+    meta:
+      owner: analytics_team
+      layer: dds
+      grain: "Один месяц × клиент × товар"
+    tags: ["dds", "intermediate"]
+    columns:
+      - name: period
+        description: "Период (первый день месяца, Date)."
+      - name: year
+        description: "Год (UInt16)."
+      - name: quarter
+        description: "Квартал (UInt8)."
+      - name: client_id
+        description: "FK → dim_client.client_id (UInt32)."
+      - name: client_segment
+        description: "Сегмент клиента (LowCardinality)."
+      - name: client_region
+        description: "Регион клиента (LowCardinality)."
+      - name: product_id
+        description: "FK → dim_product.product_id (UInt32)."
+      - name: product_category
+        description: "Категория товара (LowCardinality)."
+      - name: product_brand
+        description: "Бренд товара (LowCardinality)."
+      - name: margin_group
+        description: "Группа маржи (LowCardinality)."
+      - name: revenue
+        description: "Выручка за месяц (Decimal(18,2))."
+      - name: cogs
+        description: "Себестоимость за месяц (Decimal(18,2))."
+      - name: gross_profit
+        description: "Валовая прибыль за месяц (Decimal(18,2))."
+      - name: quantity
+        description: "Количество единиц (UInt64)."
+      - name: order_count
+        description: "Количество уникальных заказов (UInt32)."

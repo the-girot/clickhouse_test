@@ -16,5 +16,22 @@ models:
   finance_dwh:
     staging:
       +materialized: view
+    ods:
+      +materialized: table
+    dds:
+      +materialized: table
+      +schema: dds
+      dims:
+        +engine: "ReplacingMergeTree(_loaded_at_ts)"
+      facts:
+        +materialized: incremental
+        +incremental_strategy: delete+insert
+        +engine: "MergeTree()"
+      intermediate:
+        +schema: dds
+        +materialized: table
     marts:
       +materialized: table
+      +schema: dm
+      +engine: "MergeTree()"
+      +tags: ["dm"]

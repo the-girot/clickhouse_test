@@ -1,0 +1,438 @@
+version: 2
+
+models:
+
+  - name: dm_pnl_periodic
+    description: "Отчёт о прибылях и убытках (P&L) с поддержкой переключения периодов: неделя, месяц, квартал, скользящие 45 дней. Основной март для дашборда CEO/CFO. Источники: fct_gl_entry (для недели/45d), int_pnl_monthly (для месяца/квартала), dim_scenario."
+    meta:
+      owner: analytics_team
+      layer: dm
+      grain: "Одна строка = период × сценарий. Каждая строка — P&L за period_type."
+      datalens_dataset: ds_pnl
+    tags: ["dm", "dm_pnl_periodic"]
+    columns:
+      - name: period_type
+        description: "Тип периода (week/month/quarter/rolling_45d). Используйте в DataLens как фильтр."
+        tests: [not_null]
+      - name: period_start
+        description: "Дата начала периода."
+        tests: [not_null]
+      - name: period_end
+        description: "Дата окончания периода."
+      - name: period_label
+        description: "Человекочитаемая метка периода (напр. '2024-W03', '2024-03', '2024-Q1')."
+      - name: year
+        description: "Год (UInt16)."
+      - name: quarter
+        description: "Квартал (UInt8)."
+      - name: month
+        description: "Месяц (UInt8)."
+      - name: scenario_id
+        description: "ID сценария (1=Факт, 2=Бюджет, 3=Прогноз, 4=Перепрогноз)."
+        tests: [not_null]
+      - name: scenario_name
+        description: "Название сценария (LowCardinality)."
+      - name: revenue
+        description: "Выручка (Decimal(18,2))."
+        tests: [not_null]
+      - name: cogs
+        description: "Себестоимость (абсолютное значение, Decimal(18,2))."
+      - name: gross_profit
+        description: "Валовая прибыль = revenue - cogs (Decimal(18,2))."
+      - name: gross_margin_pct
+        description: "Валовая рентабельность, % (Float32)."
+      - name: opex
+        description: "Операционные расходы (абс., Decimal(18,2))."
+      - name: depreciation
+        description: "Амортизация (абс., Decimal(18,2))."
+      - name: ebitda
+        description: "EBITDA = gross_profit - opex (Decimal(18,2))."
+      - name: ebitda_margin_pct
+        description: "EBITDA margin, % (Float32)."
+      - name: ebit
+        description: "EBIT = ebitda - depreciation (Decimal(18,2))."
+      - name: financial_exp
+        description: "Финансовые расходы (абс., Decimal(18,2))."
+      - name: ebt
+        description: "Прибыль до налога = ebit - financial_exp (Decimal(18,2))."
+      - name: tax
+        description: "Налог на прибыль (абс., Decimal(18,2))."
+      - name: net_profit
+        description: "Чистая прибыль (Decimal(18,2))."
+      - name: net_margin_pct
+        description: "Чистая рентабельность, % (Float32)."
+      - name: revenue_ytd
+        description: "Выручка накопительно с начала года. Только для month grain (NULL для других)."
+      - name: net_profit_ytd
+        description: "Чистая прибыль накопительно с начала года. Только для month grain (NULL для других)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки (UInt32)."
+    tests:
+      - accepted_values:
+          column: period_type
+          values: ['week', 'month', 'quarter', 'rolling_45d']
+
+  - name: dm_balance_monthly
+    description: "Баланс (Balance Sheet) — ежемесячные снимки на конец месяца. Не поддерживает недельные/rolling гранулярности (баланс — моментальный снимок). Источник: int_balance_monthly + dim_scenario."
+    meta:
+      owner: analytics_team
+      layer: dm
+      grain: "Одна строка = месяц × сценарий."
+      datalens_dataset: ds_balance
+    tags: ["dm", "dm_balance_monthly"]
+    columns:
+      - name: period
+        description: "Дата снимка (последний день месяца, Date)."
+        tests: [not_null]
+      - name: year
+        description: "Год."
+      - name: quarter
+        description: "Квартал."
+      - name: month
+        description: "Месяц."
+      - name: scenario_id
+        description: "ID сценария."
+        tests: [not_null]
+      - name: scenario_name
+        description: "Название сценария."
+      - name: current_assets
+        description: "Оборотные активы (Decimal(18,2))."
+      - name: non_current_assets
+        description: "Внеоборотные активы (Decimal(18,2))."
+      - name: total_assets
+        description: "Итого активы = current + non_current (Decimal(18,2))."
+        tests: [not_null]
+      - name: current_liabilities
+        description: "Краткосрочные обязательства (Decimal(18,2))."
+      - name: non_current_liab
+        description: "Долгосрочные обязательства (Decimal(18,2))."
+      - name: total_liabilities
+        description: "Итого обязательства (Decimal(18,2))."
+      - name: total_equity
+        description: "Итого капитал (Decimal(18,2))."
+      - name: total_liab_equity
+        description: "Итого пассивы = обязательства + капитал (Decimal(18,2))."
+      - name: balance_diff
+        description: "Разница активов и пассивов (должна быть ~0, Decimal(18,2))."
+      - name: is_balanced
+        description: "Флаг баланса (1 если abs(balance_diff) < 1.0)."
+      - name: current_ratio
+        description: "Коэффициент текущей ликвидности (Float32)."
+      - name: debt_to_equity
+        description: "Debt-to-Equity ratio (Float32)."
+      - name: equity_ratio
+        description: "Доля собственного капитала в активах, % (Float32)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - expression_is_true:
+          name: test_balance_equation
+          expression: abs(balance_diff) < 100
+
+  - name: dm_cashflow_monthly
+    description: "Отчёт о движении денежных средств (косвенный метод). Выводится из P&L + изменений балансовых статей. Источники: int_pnl_monthly + int_balance_monthly + dim_scenario."
+    meta:
+      owner: analytics_team
+      layer: dm
+      grain: "Одна строка = месяц × сценарий."
+      datalens_dataset: ds_cashflow
+    tags: ["dm", "dm_cashflow_monthly"]
+    columns:
+      - name: period
+        description: "Дата периода (первый день месяца, Date)."
+        tests: [not_null]
+      - name: year
+        description: "Год."
+      - name: quarter
+        description: "Квартал."
+      - name: month
+        description: "Месяц."
+      - name: scenario_id
+        description: "ID сценария."
+        tests: [not_null]
+      - name: scenario_name
+        description: "Название сценария."
+      - name: net_profit
+        description: "Чистая прибыль (Decimal(18,2))."
+      - name: depreciation
+        description: "Амортизация (Decimal(18,2)) — добавляется обратно как неденежная статья."
+      - name: delta_ar
+        description: "Изменение дебиторской задолженности (+ = отток, Decimal(18,2))."
+      - name: delta_ap
+        description: "Изменение кредиторской задолженности (+ = приток, Decimal(18,2))."
+      - name: delta_inventory
+        description: "Изменение запасов (+ = отток, Decimal(18,2))."
+      - name: operating_cf
+        description: "Операционный денежный поток (Decimal(18,2))."
+      - name: investing_cf
+        description: "Инвестиционный денежный поток (Decimal(18,2))."
+      - name: financing_cf
+        description: "Финансовый денежный поток (Decimal(18,2))."
+      - name: net_cash_flow
+        description: "Чистый денежный поток = operating + investing + financing (Decimal(18,2))."
+        tests: [not_null]
+      - name: operating_cf_ytd
+        description: "Операционный CF накопительно с начала года (Decimal(18,2))."
+      - name: net_cash_flow_ytd
+        description: "Чистый CF накопительно с начала года (Decimal(18,2))."
+      - name: opening_cash
+        description: "Остаток ДС на начало месяца (Decimal(18,2))."
+      - name: closing_cash
+        description: "Остаток ДС на конец месяца (Decimal(18,2))."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dm_exec_kpi_monthly
+    description: "Исполнительная панель KPI для CEO — один ряд на месяц. Сводка P&L + Баланс + ДДС + MoM. Единый источник для топ-виджетов. Источники: dm_pnl_periodic, dm_balance_monthly, dm_cashflow_monthly."
+    meta:
+      owner: analytics_team
+      layer: dm
+      grain: "Одна строка = месяц × сценарий."
+      datalens_dataset: ds_exec_kpi
+    tags: ["dm", "dm_exec_kpi_monthly"]
+    columns:
+      - name: period
+        description: "Дата периода (первый день месяца, Date)."
+        tests: [not_null]
+      - name: period_label
+        description: "Метка периода, напр. 'Январь 2024' (русский язык)."
+      - name: year
+        description: "Год."
+      - name: quarter
+        description: "Квартал."
+      - name: month
+        description: "Месяц."
+      - name: scenario_id
+        description: "ID сценария."
+        tests: [not_null]
+      - name: scenario_name
+        description: "Название сценария."
+      - name: revenue
+        description: "Выручка (Decimal(18,2))."
+        tests: [not_null]
+      - name: gross_profit
+        description: "Валовая прибыль (Decimal(18,2))."
+      - name: gross_margin_pct
+        description: "Валовая рентабельность, % (Float32)."
+      - name: ebitda
+        description: "EBITDA (Decimal(18,2))."
+      - name: ebitda_margin_pct
+        description: "EBITDA margin, % (Float32)."
+      - name: net_profit
+        description: "Чистая прибыль (Decimal(18,2))."
+        tests: [not_null]
+      - name: net_margin_pct
+        description: "Чистая рентабельность, % (Float32)."
+      - name: revenue_mom_pct
+        description: "Изменение выручки к прошлому месяцу, % (Float32)."
+      - name: net_profit_mom_pct
+        description: "Изменение чистой прибыли к прошлому месяцу, % (Float32)."
+      - name: revenue_ytd
+        description: "Выручка YTD (Decimal(18,2))."
+      - name: net_profit_ytd
+        description: "Чистая прибыль YTD (Decimal(18,2))."
+      - name: total_assets
+        description: "Итого активы (Decimal(18,2))."
+        tests: [not_null]
+      - name: total_equity
+        description: "Итого капитал (Decimal(18,2))."
+      - name: current_ratio
+        description: "Коэффициент текущей ликвидности (Float32)."
+      - name: debt_to_equity
+        description: "Debt-to-Equity (Float32)."
+      - name: roe
+        description: "ROE = net_profit / total_equity * 100, % (Float32)."
+      - name: roa
+        description: "ROA = net_profit / total_assets * 100, % (Float32)."
+      - name: operating_cf
+        description: "Операционный денежный поток (Decimal(18,2))."
+      - name: net_cash_flow
+        description: "Чистый денежный поток (Decimal(18,2))."
+      - name: closing_cash
+        description: "Остаток ДС на конец месяца (Decimal(18,2))."
+      - name: cash_conversion
+        description: "Cash conversion = operating_cf / net_profit * 100, % (Float32)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dm_sales_marketing_periodic
+    description: "Коммерческий дашборд — продажи + маркетинг в одном марте для ROMI-анализа. Поддержка period_type switcher. Разрез по сегменту клиента и категории товара. Маркетинговые расходы на уровне периода (без сплита по сегментам/категориям). Источники: fct_sales_order_line, int_sales_monthly, fct_marketing_spend."
+    meta:
+      owner: analytics_team
+      layer: dm
+      grain: "Одна строка = period_type × период × сегмент клиента × категория товара × сценарий."
+      datalens_dataset: ds_sales_marketing
+    tags: ["dm", "dm_sales_marketing_periodic"]
+    columns:
+      - name: period_type
+        description: "Тип периода (week/month/quarter/rolling_45d). Фильтр в DataLens."
+        tests: [not_null]
+      - name: period_start
+        description: "Дата начала периода."
+        tests: [not_null]
+      - name: period_end
+        description: "Дата окончания периода."
+      - name: period_label
+        description: "Метка периода."
+      - name: year
+        description: "Год."
+      - name: quarter
+        description: "Квартал."
+      - name: client_segment
+        description: "Сегмент клиента (A/B/C, LowCardinality)."
+      - name: product_category
+        description: "Категория товара (LowCardinality)."
+      - name: scenario_id
+        description: "Всегда 1 (Факт)."
+      - name: scenario_name
+        description: "'Факт'."
+      - name: revenue
+        description: "Выручка (Decimal(18,2))."
+        tests: [not_null]
+      - name: cogs
+        description: "Себестоимость (Decimal(18,2))."
+      - name: gross_profit
+        description: "Валовая прибыль (Decimal(18,2))."
+      - name: gross_margin_pct
+        description: "Валовая рентабельность, % (Float32)."
+      - name: quantity
+        description: "Количество единиц товара (UInt64)."
+      - name: order_count
+        description: "Количество заказов (UInt32)."
+      - name: avg_order_value
+        description: "Средний чек = revenue / order_count (Decimal(18,2))."
+      - name: unique_clients
+        description: "Уникальных клиентов (UInt32)."
+      - name: marketing_spend
+        description: "Маркетинговые расходы за период (на уровне периода, не сплитятся по сегменту/категории)."
+      - name: impressions
+        description: "Количество показов рекламы (UInt64)."
+      - name: clicks
+        description: "Количество кликов (UInt64)."
+      - name: conversions
+        description: "Количество конверсий (UInt64)."
+      - name: ctr
+        description: "CTR, % (Float32)."
+      - name: cpa
+        description: "CPA — стоимость конверсии (Decimal(10,2))."
+      - name: romi
+        description: "ROMI = (gross_profit - marketing_spend) / marketing_spend * 100, % (Float32)."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+    tests:
+      - accepted_values:
+          column: period_type
+          values: ['week', 'month', 'quarter', 'rolling_45d']
+
+  - name: dm_working_capital_monthly
+    description: "Управление оборотным капиталом — AR/AP помесячно с ageing-разбивкой. Сегментация по типу счёта и сегменту контрагента. Источник: fct_invoice."
+    meta:
+      owner: analytics_team
+      layer: dm
+      grain: "Одна строка = месяц × invoice_type × сегмент контрагента."
+      datalens_dataset: ds_working_capital
+    tags: ["dm", "dm_working_capital_monthly"]
+    columns:
+      - name: period
+        description: "Дата периода (первый день месяца, Date)."
+        tests: [not_null]
+      - name: year
+        description: "Год."
+      - name: quarter
+        description: "Квартал."
+      - name: month
+        description: "Месяц."
+      - name: invoice_type
+        description: "Тип счёта (ar/ap, LowCardinality)."
+        tests: [not_null]
+      - name: counterparty_segment
+        description: "Сегмент контрагента (A/B/C/supplier/NULL)."
+      - name: invoice_count
+        description: "Количество счетов (UInt32)."
+      - name: total_invoiced
+        description: "Общая сумма выставленных счетов (Decimal(18,2))."
+        tests: [not_null]
+      - name: total_paid
+        description: "Общая сумма оплаченного (Decimal(18,2))."
+      - name: total_outstanding
+        description: "Общая сумма задолженности (Decimal(18,2))."
+      - name: collection_rate_pct
+        description: "Процент взыскания, % (Float32)."
+      - name: bucket_current
+        description: "Задолженность в категории 'Current' (Decimal(18,2))."
+      - name: bucket_1_30
+        description: "Задолженность 1-30 дней (Decimal(18,2))."
+      - name: bucket_31_60
+        description: "Задолженность 31-60 дней (Decimal(18,2))."
+      - name: bucket_61_90
+        description: "Задолженность 61-90 дней (Decimal(18,2))."
+      - name: bucket_90plus
+        description: "Задолженность 90+ дней (Decimal(18,2))."
+      - name: avg_days_overdue
+        description: "Среднее количество дней просрочки (Float32)."
+      - name: overdue_invoice_count
+        description: "Количество просроченных счетов (UInt32)."
+      - name: overdue_pct
+        description: "Доля просроченных счетов, % (Float32)."
+      - name: outstanding_ar
+        description: "Дебиторская задолженность (AR, Decimal(18,2))."
+      - name: outstanding_ap
+        description: "Кредиторская задолженность (AP, Decimal(18,2))."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+
+  - name: dm_ar_ap_aging_snapshot
+    description: "Текущий снимок AR/AP ageing — одна строка на открытый счёт (outstanding > 0). Для drill-down таблицы в DataLens (не график). Полный пересчёт при каждом запуске. Источник: fct_invoice."
+    meta:
+      owner: analytics_team
+      layer: dm
+      grain: "Одна строка = один открытый счёт (invoice)."
+      datalens_dataset: ds_ar_ap_aging
+    tags: ["dm", "dm_ar_ap_aging_snapshot"]
+    columns:
+      - name: invoice_id
+        description: "ID счёта (UInt64)."
+        tests: [not_null, unique]
+      - name: invoice_code
+        description: "Номер счёта (String)."
+      - name: invoice_type
+        description: "Тип счёта (ar/ap, LowCardinality)."
+        tests: [not_null]
+      - name: invoice_date
+        description: "Дата счёта (Date)."
+      - name: due_date
+        description: "Дата оплаты по сроку (Date)."
+      - name: days_overdue
+        description: "Дней просрочки (Int32)."
+      - name: aging_bucket
+        description: "Категория просрочки (Current/1-30d/31-60d/61-90d/90d+)."
+        tests: [not_null]
+      - name: counterparty_id
+        description: "ID контрагента (UInt32)."
+      - name: counterparty_name
+        description: "Наименование контрагента (String)."
+      - name: counterparty_type
+        description: "Тип контрагента (client/supplier, LowCardinality)."
+      - name: counterparty_segment
+        description: "Сегмент контрагента (LowCardinality, может быть NULL для suppliers)."
+      - name: counterparty_region
+        description: "Регион контрагента (LowCardinality, может быть NULL для suppliers)."
+      - name: amount
+        description: "Сумма счёта (Decimal(18,2))."
+      - name: paid_amount
+        description: "Оплаченная сумма (Decimal(18,2))."
+      - name: outstanding
+        description: "Задолженность (> 0, Decimal(18,2))."
+        tests: [not_null]
+      - name: collection_rate
+        description: "Процент взыскания (Float32)."
+      - name: risk_level
+        description: "Уровень риска (low/medium/high). Используйте для условного форматирования в DataLens: зелёный/жёлтый/красный."
+      - name: _loaded_at_ts
+        description: "Timestamp загрузки."
+      - name: snapshot_date
+        description: "Дата снимка — toDate(now())."
+    tests:
+      - expression_is_true:
+          name: test_open_invoices_only
+          expression: outstanding > 0
